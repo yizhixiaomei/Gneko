@@ -1,0 +1,158 @@
+# Gneko
+
+A pixel cat that lives on your Windows desktop. It wanders, plays with you, chases your cursor — and if you pick it up and fling it, it flies.
+
+Based on Linux Oneko (the 1990 X11 desktop cat), rewritten with tkinter + Win32 APIs.
+
+[简体中文](README.md) | **English**
+
+![preview](docs/preview.png)
+
+![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
+![python](https://img.shields.io/badge/python-3.9%2B-3776AB)
+![deps](https://img.shields.io/badge/deps-Pillow%20only-2F6F4E)
+![license](https://img.shields.io/badge/license-MIT-green)
+
+## Features
+
+- **True transparency**：Win32 layered window + color key (`#ff00ff`) — no white boxes, and transparent areas are click-through
+- **Crisp pixels**：integer nearest-neighbour upscaling + per-process DPI awareness; switch between 1x–6x at any time
+- **8-direction walking**：reuses `upleft / upright / dwleft / dwright` sprites so diagonal movement looks natural
+- **Adaptive frame rate**：~24 ms per frame while walking, 55 ms while idling or sleeping
+- **Chases you**：the further away you are, the faster it runs (up to 2.6×); it "catches" you within 16 px of the cursor and celebrates. Flicking the mouse quickly excites it more; it only loses interest when you really stop moving
+- **Fling**：grab it and flick — it flies with inertia, bounces off screen edges, and is briefly stunned on landing
+- **Multi-cat networking**：UDP position broadcast — run two instances and they chase each other; a closed instance is forgotten after 2.5 s
+- **Stays out of your way**：click-through mode (`Ctrl+Alt+G` toggles it)
+- **Tunable**：40+ behaviour parameters in `Gneko_config.json`
+
+## Requirements
+
+- Windows 10 / 11 (relies on Win32 layered windows and system cursor APIs)
+- Python 3.9+ with tkinter
+- [Pillow](https://python-pillow.org/) (the only third-party dependency)
+
+## Quick start
+
+```bash
+git clone <this-repo> gneko
+cd gneko
+pip install -r requirements.txt
+```
+
+Double-click `Gneko.py`, or:
+
+```bash
+pyw -3 Gneko.py          # no console (recommended for daily use)
+py -3 Gneko.py           # with console, easier for debugging
+```
+
+`Gneko_config.json` is generated on first launch, and the log goes to `Gneko.log` (`pythonw` has no console, so all exceptions land there). Both files are already listed in `.gitignore`.
+
+## Controls
+
+| Action | Effect |
+| --- | --- |
+| Left-drag | Pick it up and drop it anywhere; it may scratch at the nearest edge afterwards |
+| Flick | Release faster than 900 px/s and it flies with inertia, bouncing off screen edges |
+| Double-click | Spin in place for 3 seconds |
+| Right-click | Menu: scale / speed / follow / bubbles / click-through / sleep / come to cursor / reload sprites / quit |
+| Click anywhere | Raises its "interest", so it comes over sooner |
+| `Ctrl+Alt+G` | Toggle click-through |
+| `Esc` | Quit |
+
+> While click-through is on you can't click the cat itself — press `Ctrl+Alt+G` first, then right-click.
+
+Changes are written back to `Gneko_config.json`.
+
+## Behaviour
+
+State machine: `idle / walk / pet / scratch / groom / sleep / play / avoid / sit_approach / sit_cursor / spin_action / flung`
+
+Chasing has four personalities; a sub-mode sticks for 0.9–2.6 s instead of being re-rolled every frame (so its path doesn't jitter):
+
+| Sub-mode | Behaviour |
+| --- | --- |
+| `chase_normal` | Charges straight at the cursor |
+| `chase_follow` | Keeps 90–140 px behind |
+| `chase_shy` | Backs off when too close (only right after a catch, or when tired) |
+| `chase_pounce` | Accelerated pounce when interest is high |
+
+The cat has stamina: chasing drains it, idling and sleeping restore it, and below a threshold it stops chasing.
+
+While chasing, the system arrow cursor is swapped for oneko's original mouse icon (`Gneko_png/mouse.png`, 17×12, hotspot 8,7). It works by temporarily replacing `IDC_ARROW` via `CopyIcon` + `SetSystemCursor`, so it applies to the whole desktop without affecting I-beam cursors. The cursor is restored when the cat stops chasing, when you pick it up, or when the app exits. If it ever gets killed before restoring, run `py -3 Gneko.py --restore-cursor`.
+
+## Configuration
+
+Missing keys in `Gneko_config.json` are filled with defaults; unknown keys are reported and ignored at startup. Common ones:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `SCALE` | `2` | Pixel upscaling factor (2 = 64×64) |
+| `BASE_SPEED` | `1.4` | Base movement speed |
+| `AUTO_SCALE_HIDPI` | `false` | Scale automatically from system DPI |
+| `CHASE_TRIGGER_DIST` | `220` | Distance at which chasing starts |
+| `CHASE_MAX_SPEED_MULT` | `2.6` | Maximum chase speed-up |
+| `CHASE_CATCH_DIST` | `16` | Distance that counts as "caught" |
+| `INTEREST_FLOOR` | `45` | Interest floor while the cursor is nearby |
+| `FLING_MIN_SPEED` | `900` | Minimum release speed for a fling (px/s) |
+| `MOUSE_CURSOR_ENABLE` | `true` | Swap in the mouse cursor while chasing |
+| `CLICK_THROUGH` | `false` | Click-through mode |
+| `ENABLE_MULTICAT_NET` | `true` | Multi-cat networking (UDP 58231) |
+
+The full list lives in `DEFAULT_CONFIG` at the top of `Gneko.py`.
+
+## Command line
+
+```bash
+py -3 Gneko.py --debug            # print state logs
+py -3 Gneko.py --scale 3          # temporary 3x size
+py -3 Gneko.py --selftest 10      # run 10 s then exit (for troubleshooting)
+py -3 Gneko.py -c other.json      # use a different config file
+py -3 Gneko.py --restore-cursor   # only restore the system cursor to default
+```
+
+## Project layout
+
+```
+.
+├─ Gneko.py             # all the code, single file
+├─ Gneko_png/           # 33 cat frames + mouse.png cursor
+├─ README.md            # Chinese version
+├─ README.en.md         # English version
+├─ docs/preview.png     # README preview
+├─ tools/make_preview.py
+├─ requirements.txt
+└─ LICENSE
+```
+
+## Sprites
+
+32×32 PNGs in `Gneko_png/`, grouped automatically by filename:
+
+- `up1/up2`, `upleft1/2`, `dwleft1/2` … → walking (`1/2` are the two animation frames)
+- `utogi / dtogi / ltogi / rtogi` → scratching at edges
+- `kaki1/2` → grooming, `sleep1/2` → sleeping, `jare2` → playing
+- `awake`, `mati2`, `mati3` → idling, `pet` → being petted
+- `mouse.png` → the mouse cursor used while chasing
+- Cursor-pack icons such as `text.png` / `no.png` are skipped at load time and never treated as animation frames
+
+Drop new sprites in with the same naming scheme and use "reload sprites" from the menu. The original `mati` / `pet` frames have a white background; at load time the **edge-connected** white is flood-filled away (white inside the cat is kept), so no white box ever shows up.
+
+## FAQ
+
+**It occasionally shows a white box?** That means a sprite is a white-background version — automatic background removal is built in, but only pure white is handled.
+
+**The cursor is still a mouse?** It was killed before it could restore. Run `py -3 Gneko.py --restore-cursor`.
+
+**Another window covers it?** It stays on top via `WS_EX_LAYERED | WS_EX_TOOLWINDOW` + `SetWindowPos`; some exclusive fullscreen games override that, which is expected.
+
+**Two cats ignore each other?** Check whether your firewall blocks UDP 58231.
+
+## Credits
+
+- Cat sprites come from oneko (Tatsuya Kato's 1990 X11 version; artwork by Juan Gotoh, converted to X11 bitmaps by Masayuki Koba). Debian's copyright file lists them as public domain
+- The mouse cursor is oneko's `mouse_cursor.xbm` (17×12, hotspot 8,7)
+
+## License
+
+Code is MIT — see [LICENSE](LICENSE). Sprite attribution and licensing are covered under Credits above.
