@@ -83,6 +83,17 @@ py -3 Gneko.py           # with console, easier for debugging
 
 `Gneko_config.json` is generated on first launch, and the log goes to `Gneko.log` (`pythonw` has no console, so all exceptions land there). Both files are already listed in `.gitignore`.
 
+### English source
+
+`Gneko_en.py` is a fully English copy of the same code: **comments, docstrings, log output, right-click menu, speech lines and CLI help are all in English**, and the logic is identical to `Gneko.py` (verified node by node through the AST — the only difference is one fewer Chinese alias in the skin alias list).
+
+```bash
+py -3 Gneko_en.py             # English build
+py -3 Gneko_en.py --skin snow # same CLI arguments
+```
+
+Both files share the same `Gneko_config.json` and `skins/` folder, so you can run either without them fighting. If you fork the project, translate the comments along with the Chinese file — the two stay structurally identical.
+
 ## Controls
 
 | Action | Effect |
@@ -155,7 +166,8 @@ py -3 Gneko.py --restore-cursor   # only restore the system cursor to default
 
 ```
 .
-├─ Gneko.py             # all the code, single file
+├─ Gneko.py             # all the code, single file (Chinese comments)
+├─ Gneko_en.py          # English-only copy: comments, docstrings, logs and UI in English
 ├─ Gneko_png/           # original 33 cat frames + mouse.png cursor
 ├─ skins/               # 9 preset skins, each a full sprite pack
 │  ├─ orange/  gray/  pink/  mint/  sky/
@@ -199,7 +211,7 @@ The main body of this project (`Gneko.py` and `tools/make_preview.py`) was writt
 
 A few clarifications:
 
-- **Code**: AI-generated, then manually tested and patched. Every behaviour has been exercised on Windows 10/11, though untested edge cases may remain
+- **Code**: AI-generated, then manually tested and patched. Every behaviour has been exercised on Windows 10/11, though untested edge cases may remain. `Gneko_en.py` is an English translation of the same code, not a separate implementation
 - **Art assets**: The pixel cat sprites in `Gneko_png/` and `mouse.png` all come from the original oneko (public domain) — **not** AI-generated. The `skins/` packs are recolours of that same original pixel art produced by `tools/make_skins.py`, not AI-drawn images. See Credits for attribution
 - **Docs**: This README and `README.md` were drafted by AI and reviewed before committing
 - **License**: Code is MIT — free to use, modify and redistribute. Keeping this notice in forks is appreciated

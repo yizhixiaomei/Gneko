@@ -83,6 +83,17 @@ py -3 Gneko.py           # 带控制台，方便看报错
 
 首次启动会自动生成 `Gneko_config.json`，日志写在 `Gneko.log`（`pythonw` 没有控制台，异常都进这里）。这两个文件已经在 `.gitignore` 里。
 
+### 英文版源码
+
+`Gneko_en.py` 是同一份代码的完整英文版：**注释、文档字符串、日志输出、右键菜单、气泡台词、命令行帮助全部是英文**，逻辑与 `Gneko.py` 一模一样（已用 AST 逐节点比对，只差皮肤别名列表里少了个中文别名）。
+
+```bash
+py -3 Gneko_en.py             # 英文版
+py -3 Gneko_en.py --skin snow # 参数也通用
+```
+
+两个文件共用同一个 `Gneko_config.json` 和 `skins/` 目录，换着跑不会互相打架。想维护自己的 fork 时，改完中文版把注释一起翻过去就行——两份代码结构完全一致。
+
 ## 操作
 
 | 操作 | 效果 |
@@ -157,7 +168,8 @@ py -3 Gneko.py --restore-cursor   # 只把系统光标恢复成默认箭头
 
 ```
 .
-├─ Gneko.py             # 全部代码，单文件
+├─ Gneko.py             # 全部代码，单文件（中文注释）
+├─ Gneko_en.py          # 同一份代码的纯英文版：注释、文档字符串、日志、菜单全英文
 ├─ Gneko_png/           # 原版 33 帧猫 + mouse.png 光标
 ├─ skins/               # 9 套预制皮肤，每套一份完整素材包
 │  ├─ orange/  gray/  pink/  mint/  sky/
@@ -202,7 +214,7 @@ py -3 Gneko.py --restore-cursor   # 只把系统光标恢复成默认箭头
 
 需要说明的几点：
 
-- **代码**：AI 生成 + 人工实测修正。所有行为均在 Windows 10/11 实机跑过，但不排除仍存在未覆盖的边界情况
+- **代码**：AI 生成 + 人工实测修正。所有行为均在 Windows 10/11 实机跑过，但不排除仍存在未覆盖的边界情况。`Gneko_en.py` 是同一份代码的英文翻译版，不是另一套实现
 - **素材**：`Gneko_png/` 下的像素猫和 `mouse.png` 全部来自 oneko 原版（public domain），**非 AI 生成**；`skins/` 里的各套皮肤是 `tools/make_skins.py` 对同一批原始像素画做的自动换色，也不是 AI 画的图，版权与署名见下方「致谢」
 - **文档**：本 README 与 `README.en.md` 由 AI 起草，经作者核对后提交
 - **许可证**：代码采用 MIT，可自由使用、修改、再发布；若你二次分发，建议保留本节说明
