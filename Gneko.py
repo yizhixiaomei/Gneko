@@ -106,6 +106,10 @@ def ensure_std_streams() -> None:
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     # 素材与外观
+    # SKIN: "classic" 用 SPRITE_FOLDER 里的原版素材；
+    # 其他值去 SKINS_DIR/<SKIN>/ 里找素材，找不到就退回 classic
+    "SKIN": "classic",
+    "SKINS_DIR": "skins",
     "SPRITE_FOLDER": "Gneko_png",
     "PET_WIDTH": 32,
     "PET_HEIGHT": 32,
@@ -395,7 +399,55 @@ def load_or_create_config(config_path: Path) -> Dict[str, Any]:
     return merged
 
 
+SKIN_CLASSIC = "classic"
+SKIN_CLASSIC_ALIASES = ("classic", "default", "base", "orig", "original", "原版")
+
+# 预制皮肤的中文名，仅用于菜单和气泡提示
+SKIN_LABELS = {
+    "orange": "橘猫",
+    "gray": "银灰",
+    "pink": "粉猫",
+    "mint": "薄荷",
+    "sky": "天空",
+    "lavender": "香芋",
+    "coffee": "咖啡",
+    "snow": "雪白",
+    "black": "墨黑",
+}
+
+
+def skins_root(cfg: Dict[str, Any]) -> Path:
+    folder = Path(str(cfg.get("SKINS_DIR") or "skins"))
+    return folder if folder.is_absolute() else (APP_DIR / folder)
+
+
+def available_skins(cfg: Dict[str, Any]) -> List[str]:
+    """列出 skins 目录下所有可用的皮肤（必须至少有一张 PNG）。"""
+    root = skins_root(cfg)
+    if not root.exists():
+        return []
+    out = []
+    try:
+        for p in sorted(root.iterdir()):
+            if p.is_dir() and next(p.glob("*.png"), None) is not None:
+                out.append(p.name)
+    except Exception:
+        pass
+    return out
+
+
+def skin_label(name: str) -> str:
+    return SKIN_LABELS.get(name, name)
+
+
 def resolve_asset_dir(cfg: Dict[str, Any]) -> Path:
+    skin = str(cfg.get("SKIN") or SKIN_CLASSIC).strip()
+    if skin and skin.lower() not in SKIN_CLASSIC_ALIASES:
+        d = skins_root(cfg) / skin
+        if d.exists() and next(d.glob("*.png"), None) is not None:
+            return d
+        print(f"[WARN] 皮肤 {skin} 不存在或缺素材，回退到原版")
+
     folder = Path(str(cfg.get("SPRITE_FOLDER") or "Gneko_png"))
     if folder.name in ("neko_png", "Neko_png"):
         folder = folder.with_name("Gneko_png")
@@ -1063,6 +1115,23 @@ class GnekoPet:
         self.menu.add_command(label="回到鼠标处", command=self.jump_to_cursor)
         self.menu.add_command(label="转个圈", command=self.trigger_spin_action)
         self.menu.add_separator()
+        # 皮肤：预制素材包 + 原版
+        skin_menu = tk.Menu(self.menu, tearoff=0)
+        cur_skin = str(self.cfg.get("SKIN") or SKIN_CLASSIC).strip()
+        if cur_skin.lower() in SKIN_CLASSIC_ALIASES:
+            cur_skin = SKIN_CLASSIC
+        self.skin_var = tk.StringVar(value=cur_skin)
+        skin_menu.add_radiobutton(label="原版（黑白）", value=SKIN_CLASSIC,
+                                  variable=self.skin_var,
+                                  command=lambda: self.set_skin(SKIN_CLASSIC))
+        names = available_skins(self.cfg)
+        if names:
+            skin_menu.add_separator()
+        for name in names:
+            skin_menu.add_radiobutton(label=f"{skin_label(name)}（{name}）", value=name,
+                                      variable=self.skin_var,
+                                      command=lambda n=name: self.set_skin(n))
+        self.menu.add_cascade(label="皮肤", menu=skin_menu)
         self.menu.add_command(label="重载素材", command=self.reload_sprites)
         self.menu.add_command(label="打开素材文件夹", command=self.open_asset_folder)
         bg_menu = tk.Menu(self.menu, tearoff=0)
@@ -1153,6 +1222,40 @@ class GnekoPet:
         self.bank = SpriteBank(self.asset_dir, self.scale, self.key_color, self.cell)
         self._last_img = None
         self.say("换新衣服")
+
+    def set_skin(self, name: str) -> None:
+        """切换皮肤：换素材目录 + 重建帧缓存 + 同步老鼠光标。"""
+        name = str(name or SKIN_CLASSIC).strip() or SKIN_CLASSIC
+        if name.lower() in SKIN_CLASSIC_ALIASES:
+            name = SKIN_CLASSIC
+        if name != SKIN_CLASSIC:
+            cand = skins_root(self.cfg) / name
+            if not cand.exists() or next(cand.glob("*.png"), None) is None:
+                name = SKIN_CLASSIC      # 目录不存在就当原版，别在配置里留个死名字
+        self.cfg["SKIN"] = name
+        self.asset_dir = resolve_asset_dir(self.cfg)
+        self.bank = SpriteBank(self.asset_dir, self.scale, self.key_color, self.cell)
+        self._last_img = None
+        if self.bank.count == 0:
+            # 素材全废了也退回原版，别让猫变成隐形
+            self.cfg["SKIN"] = SKIN_CLASSIC
+            self.asset_dir = resolve_asset_dir(self.cfg)
+            self.bank = SpriteBank(self.asset_dir, self.scale, self.key_color, self.cell)
+            self.say("这套没素材呀")
+        else:
+            self.say(f"换上{skin_label(name)}")
+        if hasattr(self, "skin_var"):
+            self.skin_var.set(str(self.cfg.get("SKIN") or SKIN_CLASSIC))
+        # 老鼠光标跟着皮肤目录走
+        if self.mouse_cursor is not None:
+            self.mouse_cursor.set_active(False)
+            self.mouse_cursor = None
+        if self.cfg.get("MOUSE_CURSOR_ENABLE", True):
+            png = self.asset_dir / "mouse.png"
+            if png.exists():
+                mc = MouseCursor(png, int(self.cfg.get("MOUSE_CURSOR_SCALE", 2)))
+                self.mouse_cursor = mc if mc.ok else None
+        self.save()
 
     def set_click_through(self, on: bool, silent: bool = False) -> None:
         """穿透点击：猫不再挡住底下的窗口，Ctrl+Alt+G 随时切回来。"""
@@ -2025,6 +2128,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Gneko 桌面猫")
     parser.add_argument("--config", "-c", default=None, help="配置文件路径")
     parser.add_argument("--scale", "-s", type=int, default=None, help="临时指定缩放倍数")
+    parser.add_argument("--skin", default=None, help="临时指定皮肤（classic 或 skins 下的目录名）")
+    parser.add_argument("--list-skins", action="store_true", help="列出所有可用皮肤后退出")
     parser.add_argument("--selftest", type=float, default=0, help="自检运行秒数后自动退出")
     parser.add_argument("--debug", action="store_true", help="打印状态日志")
     parser.add_argument("--restore-cursor", action="store_true",
@@ -2038,6 +2143,17 @@ def main() -> None:
 
     config_path = Path(args.config) if args.config else (APP_DIR / "Gneko_config.json")
     cfg = load_or_create_config(config_path)
+
+    if args.list_skins:
+        names = available_skins(cfg)
+        print(f"可用皮肤（{skins_root(cfg)}）：")
+        print(f"  classic  原版（黑白）")
+        for n in names:
+            print(f"  {n:9s}{skin_label(n)}")
+        return
+
+    if args.skin:
+        cfg["SKIN"] = args.skin
     if args.scale:
         cfg["SCALE"] = args.scale
         cfg["AUTO_SCALE_HIDPI"] = False
@@ -2047,7 +2163,7 @@ def main() -> None:
 
     print("==== Gneko 桌宠 v2 启动 ====")
     print(f"[Gneko] 配置: {config_path}")
-    print(f"[Gneko] 素材: {resolve_asset_dir(cfg)}")
+    print(f"[Gneko] 素材: {resolve_asset_dir(cfg)}（皮肤 {cfg.get('SKIN') or SKIN_CLASSIC}）")
 
     root = tk.Tk()
     root.report_callback_exception = lambda *_: log_exception("tk-callback")

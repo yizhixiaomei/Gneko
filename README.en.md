@@ -24,6 +24,41 @@ Based on Linux Oneko (the 1990 X11 desktop cat), rewritten with tkinter + Win32 
 - **Multi-cat networking**：UDP position broadcast — run two instances and they chase each other; a closed instance is forgotten after 2.5 s
 - **Stays out of your way**：click-through mode (`Ctrl+Alt+G` toggles it)
 - **Tunable**：40+ behaviour parameters in `Gneko_config.json`
+- **9 preset skins**：orange, gray, pink, mint, sky, lavender, coffee, snow, ink — switch from the right-click menu
+
+## Skins
+
+Every folder under `skins/` is a complete sprite pack (recoloured frames + `mouse.png`) using exactly the same file-name rules as `Gneko_png`.
+
+| Name | Look | Name | Look |
+| --- | --- | --- | --- |
+| `orange` | orange tabby tint | `lavender` | lavender |
+| `gray` | silver gray | `coffee` | coffee brown |
+| `pink` | pink | `snow` | snow white |
+| `mint` | mint green | `black` | ink black |
+| `sky` | sky blue | `classic` | original B&W (`Gneko_png`) |
+
+![skins](docs/skins_preview.png)
+
+Three ways to switch:
+
+1. **Right-click → 皮肤 (Skins)**, pick one — applied instantly and written back to the config
+2. Set `"SKIN": "orange"` in `Gneko_config.json` and restart
+3. Try it from the CLI: `py -3 Gneko.py --skin snow`
+
+`SKIN` set to `classic` (or empty) uses `SPRITE_FOLDER` (default `Gneko_png`). Any other value looks for `SKINS_DIR/skins/<name>/`; a missing or empty folder falls back to `classic` with a warning.
+
+### Making your own skin
+
+The original pixel art uses just two colours — **solid black body + white rim**, so a skin is basically a two-colour swap.
+
+```bash
+# 1. add an entry to the SKINS dict in tools/make_skins.py: (label, body, rim)
+# 2. regenerate all skins
+py -3 tools/make_skins.py
+```
+
+Or copy `skins/orange` to a new folder and repaint the PNGs by hand. Keep the naming pattern (`up1`, `dwleft2`, `sleep1`, `utogi`, …) and they will be picked up; the minimum viable skin is `right1`/`right2` plus one `awake` frame — anything missing falls back automatically.
 
 ## Requirements
 
@@ -55,7 +90,7 @@ py -3 Gneko.py           # with console, easier for debugging
 | Left-drag | Pick it up and drop it anywhere; it may scratch at the nearest edge afterwards |
 | Flick | Release faster than 900 px/s and it flies with inertia, bouncing off screen edges |
 | Double-click | Spin in place for 3 seconds |
-| Right-click | Menu: scale / speed / follow / bubbles / click-through / sleep / come to cursor / reload sprites / quit |
+| Right-click | Menu: scale / speed / skins / follow / bubbles / click-through / sleep / come to cursor / reload sprites / quit |
 | Click anywhere | Raises its "interest", so it comes over sooner |
 | `Ctrl+Alt+G` | Toggle click-through |
 | `Esc` | Quit |
@@ -87,6 +122,9 @@ Missing keys in `Gneko_config.json` are filled with defaults; unknown keys are r
 
 | Key | Default | Meaning |
 | --- | --- | --- |
+| `SKIN` | `classic` | Skin name; `classic` = original sprites |
+| `SKINS_DIR` | `skins` | Root folder for skins (relative to the program folder) |
+| `SPRITE_FOLDER` | `Gneko_png` | Sprite folder used by `classic` |
 | `SCALE` | `2` | Pixel upscaling factor (2 = 64×64) |
 | `BASE_SPEED` | `1.4` | Base movement speed |
 | `AUTO_SCALE_HIDPI` | `false` | Scale automatically from system DPI |
@@ -106,6 +144,8 @@ The full list lives in `DEFAULT_CONFIG` at the top of `Gneko.py`.
 ```bash
 py -3 Gneko.py --debug            # print state logs
 py -3 Gneko.py --scale 3          # temporary 3x size
+py -3 Gneko.py --skin orange      # temporarily use the orange skin
+py -3 Gneko.py --list-skins       # list all available skins
 py -3 Gneko.py --selftest 10      # run 10 s then exit (for troubleshooting)
 py -3 Gneko.py -c other.json      # use a different config file
 py -3 Gneko.py --restore-cursor   # only restore the system cursor to default
@@ -116,11 +156,16 @@ py -3 Gneko.py --restore-cursor   # only restore the system cursor to default
 ```
 .
 ├─ Gneko.py             # all the code, single file
-├─ Gneko_png/           # 33 cat frames + mouse.png cursor
+├─ Gneko_png/           # original 33 cat frames + mouse.png cursor
+├─ skins/               # 9 preset skins, each a full sprite pack
+│  ├─ orange/  gray/  pink/  mint/  sky/
+│  └─ lavender/ coffee/ snow/ black/
 ├─ README.md            # Chinese version
 ├─ README.en.md         # English version
 ├─ docs/preview.png     # README preview
-├─ tools/make_preview.py
+├─ docs/skins_preview.png  # skin reference sheet
+├─ tools/make_preview.py   # builds the preview image
+├─ tools/make_skins.py     # generates the preset skins from Gneko_png
 ├─ requirements.txt
 └─ LICENSE
 ```
@@ -155,7 +200,7 @@ The main body of this project (`Gneko.py` and `tools/make_preview.py`) was writt
 A few clarifications:
 
 - **Code**: AI-generated, then manually tested and patched. Every behaviour has been exercised on Windows 10/11, though untested edge cases may remain
-- **Art assets**: The pixel cat sprites in `Gneko_png/` and `mouse.png` all come from the original oneko (public domain) — **not** AI-generated. See Credits for attribution
+- **Art assets**: The pixel cat sprites in `Gneko_png/` and `mouse.png` all come from the original oneko (public domain) — **not** AI-generated. The `skins/` packs are recolours of that same original pixel art produced by `tools/make_skins.py`, not AI-drawn images. See Credits for attribution
 - **Docs**: This README and `README.md` were drafted by AI and reviewed before committing
 - **License**: Code is MIT — free to use, modify and redistribute. Keeping this notice in forks is appreciated
 

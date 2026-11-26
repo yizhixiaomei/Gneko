@@ -24,6 +24,41 @@
 - **多猫联机**：UDP 广播坐标，开两只就会互相追；对方关掉后 2.5s 自动忘掉它
 - **不挡手**：穿透点击模式（`Ctrl+Alt+G` 一键切换）
 - **可调教**：40+ 项行为参数写在 `Gneko_config.json`
+- **9 套预制皮肤**：橘猫、银灰、粉猫、薄荷、天空、香芋、咖啡、雪白、墨黑，右键一键换皮
+
+## 皮肤
+
+`skins/` 下每套皮肤是一份完整素材包（换色后的动作帧 + `mouse.png`），文件名规则和 `Gneko_png` 完全一样。
+
+| 名字 | 中文 | 名字 | 中文 |
+| --- | --- | --- | --- |
+| `orange` | 橘猫 | `lavender` | 香芋 |
+| `gray` | 银灰 | `coffee` | 咖啡 |
+| `pink` | 粉猫 | `snow` | 雪白 |
+| `mint` | 薄荷 | `black` | 墨黑 |
+| `sky` | 天空 | `classic` | 原版黑白（用 `Gneko_png`） |
+
+![skins](docs/skins_preview.png)
+
+切换方式（三种任选）：
+
+1. **右键菜单 → 皮肤**，点哪个立刻换，自动写回配置
+2. 改 `Gneko_config.json` 里的 `"SKIN": "orange"`，重启生效
+3. 命令行临时试：`py -3 Gneko.py --skin snow`
+
+`SKIN` 填 `classic`（或留空）就用 `SPRITE_FOLDER`（默认 `Gneko_png`）里的原版素材；填别的名字则去 `SKINS_DIR/skins/<名字>/` 找素材，目录不存在或没有 PNG 会自动退回原版并打一行警告。
+
+### 自己做一套皮肤
+
+原版像素画只有两个颜色：**纯黑身体 + 白色描边**，所以换肤本质就是换这两色。
+
+```bash
+# 1. 编辑 tools/make_skins.py 里的 SKINS 字典，加一行 (中文名, 身体色, 描边色)
+# 2. 重新生成全部皮肤
+py -3 tools/make_skins.py
+```
+
+不想跑脚本也行：复制 `skins/orange` 改成新名字，直接用画图/像素工具改 PNG 保存。文件名规则（`up1`、`dwleft2`、`sleep1`、`utogi`…）保持不变就会被识别；一套皮肤最少只要 `right1/right2` 两帧加一只 `awake` 就能跑，缺的动作会自动回退。
 
 ## 环境要求
 
@@ -55,7 +90,7 @@ py -3 Gneko.py           # 带控制台，方便看报错
 | 左键拖动 | 把它拎到任意位置，松手后可能贴边磨爪子 |
 | 左键甩动 | 松手手速 > 900 px/s 就带惯性飞出去，撞屏幕边缘会弹 |
 | 左键双击 | 原地转圈 3 秒 |
-| 右键 | 菜单：大小 / 速度 / 跟随 / 气泡 / 穿透 / 睡觉 / 回鼠标处 / 重载素材 / 退出 |
+| 右键 | 菜单：大小 / 速度 / 皮肤 / 跟随 / 气泡 / 穿透 / 睡觉 / 回鼠标处 / 重载素材 / 退出 |
 | 点任意地方 | 提升"兴趣值"，它会更快凑过来 |
 | `Ctrl+Alt+G` | 切换穿透点击 |
 | `Esc` | 退出 |
@@ -89,6 +124,9 @@ py -3 Gneko.py           # 带控制台，方便看报错
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
+| `SKIN` | `classic` | 皮肤名，见上文「皮肤」；`classic` = 原版素材 |
+| `SKINS_DIR` | `skins` | 皮肤根目录，相对路径按程序目录算 |
+| `SPRITE_FOLDER` | `Gneko_png` | `classic` 用的原版素材目录 |
 | `SCALE` | `2` | 像素放大倍数（2 = 64×64） |
 | `BASE_SPEED` | `1.4` | 基础速度 |
 | `AUTO_SCALE_HIDPI` | `false` | 按系统 DPI 自动放大 |
@@ -108,6 +146,8 @@ py -3 Gneko.py           # 带控制台，方便看报错
 ```bash
 py -3 Gneko.py --debug            # 打印状态日志
 py -3 Gneko.py --scale 3          # 临时 3 倍
+py -3 Gneko.py --skin orange      # 临时换成橘猫皮肤
+py -3 Gneko.py --list-skins       # 列出所有可用皮肤
 py -3 Gneko.py --selftest 10      # 跑 10 秒自动退出（排查用）
 py -3 Gneko.py -c other.json      # 指定配置
 py -3 Gneko.py --restore-cursor   # 只把系统光标恢复成默认箭头
@@ -118,11 +158,16 @@ py -3 Gneko.py --restore-cursor   # 只把系统光标恢复成默认箭头
 ```
 .
 ├─ Gneko.py             # 全部代码，单文件
-├─ Gneko_png/           # 33 帧猫 + mouse.png 光标
+├─ Gneko_png/           # 原版 33 帧猫 + mouse.png 光标
+├─ skins/               # 9 套预制皮肤，每套一份完整素材包
+│  ├─ orange/  gray/  pink/  mint/  sky/
+│  └─ lavender/ coffee/ snow/ black/
 ├─ README.md            # 中文说明
 ├─ README.en.md         # English version
 ├─ docs/preview.png     # README 预览图
-├─ tools/make_preview.py
+├─ docs/skins_preview.png  # 皮肤对照图
+├─ tools/make_preview.py   # 生成预览图
+├─ tools/make_skins.py     # 从 Gneko_png 生成各套皮肤
 ├─ requirements.txt
 └─ LICENSE
 ```
@@ -158,7 +203,7 @@ py -3 Gneko.py --restore-cursor   # 只把系统光标恢复成默认箭头
 需要说明的几点：
 
 - **代码**：AI 生成 + 人工实测修正。所有行为均在 Windows 10/11 实机跑过，但不排除仍存在未覆盖的边界情况
-- **素材**：`Gneko_png/` 下的像素猫和 `mouse.png` 全部来自 oneko 原版（public domain），**非 AI 生成**，版权与署名见下方「致谢」
+- **素材**：`Gneko_png/` 下的像素猫和 `mouse.png` 全部来自 oneko 原版（public domain），**非 AI 生成**；`skins/` 里的各套皮肤是 `tools/make_skins.py` 对同一批原始像素画做的自动换色，也不是 AI 画的图，版权与署名见下方「致谢」
 - **文档**：本 README 与 `README.en.md` 由 AI 起草，经作者核对后提交
 - **许可证**：代码采用 MIT，可自由使用、修改、再发布；若你二次分发，建议保留本节说明
 
