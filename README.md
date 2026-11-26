@@ -151,6 +151,19 @@ py -3 Gneko.py --restore-cursor   # 只把系统光标恢复成默认箭头
 
 **开了两只猫互不理睬？** 检查防火墙是否拦了 UDP 58231。
 
+## AI 生成说明
+
+本项目的代码主体（`Gneko.py` 及 `tools/make_preview.py`）由 AI 辅助生成：由作者提出需求、约束与调试反馈，AI 负责撰写和迭代代码，作者负责在真实 Windows 环境上运行验证、修 bug 和定稿。
+
+需要说明的几点：
+
+- **代码**：AI 生成 + 人工实测修正。所有行为均在 Windows 10/11 实机跑过，但不排除仍存在未覆盖的边界情况
+- **素材**：`Gneko_png/` 下的像素猫和 `mouse.png` 全部来自 oneko 原版（public domain），**非 AI 生成**，版权与署名见下方「致谢」
+- **文档**：本 README 与 `README.en.md` 由 AI 起草，经作者核对后提交
+- **许可证**：代码采用 MIT，可自由使用、修改、再发布；若你二次分发，建议保留本节说明
+
+如果你在 fork 或改造后遇到问题，欢迎在 Issues 里反馈。
+
 ## 致谢
 
 - 猫素材来自 oneko（Tatsuya Kato 1990 年的 X11 版本；猫图由 Juan Gotoh 绘制，Masayuki Koba 转成 X11 位图）。Debian 的版权文件将其列为 public domain

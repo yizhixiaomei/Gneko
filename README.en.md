@@ -148,6 +148,19 @@ Drop new sprites in with the same naming scheme and use "reload sprites" from th
 
 **Two cats ignore each other?** Check whether your firewall blocks UDP 58231.
 
+## AI-Generated Code Notice
+
+The main body of this project (`Gneko.py` and `tools/make_preview.py`) was written with AI assistance: the author supplied the requirements, constraints and debugging feedback, while the AI drafted and iterated on the code. All final code was run, tested and corrected by the author on real Windows machines.
+
+A few clarifications:
+
+- **Code**: AI-generated, then manually tested and patched. Every behaviour has been exercised on Windows 10/11, though untested edge cases may remain
+- **Art assets**: The pixel cat sprites in `Gneko_png/` and `mouse.png` all come from the original oneko (public domain) — **not** AI-generated. See Credits for attribution
+- **Docs**: This README and `README.md` were drafted by AI and reviewed before committing
+- **License**: Code is MIT — free to use, modify and redistribute. Keeping this notice in forks is appreciated
+
+If you hit a problem after forking or modifying, feel free to open an Issue.
+
 ## Credits
 
 - Cat sprites come from oneko (Tatsuya Kato's 1990 X11 version; artwork by Juan Gotoh, converted to X11 bitmaps by Masayuki Koba). Debian's copyright file lists them as public domain
