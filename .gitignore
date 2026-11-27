@@ -14,7 +14,16 @@ Gneko.log
 .vscode/
 .localcopilot/
 
+# 打包产物
+dist/
+build/
+*.spec
+_release/
+_exetest/
+
 # 临时文件
 *.tmp
 _chase_out.txt
 _raw*.txt
+
+_build*.log

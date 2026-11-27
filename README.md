@@ -64,14 +64,21 @@ py -3 tools/make_skins.py
 
 不想自己搭环境的话，直接去 [Releases](https://github.com/yizhixiaomei/Gneko/releases) 页面拿打包好的文件：
 
+- `Gneko-vX.Y.Z-windows-x64.exe`：**免装 Python 的单文件版**，下载双击即用（约 20 MB）
 - `Gneko-vX.Y.Z-source.zip`：完整源码 + 素材 + 九套皮肤
 - `Gneko-cursor-pack.zip`：Windows 像素猫光标包（`.cur` / `.ani` + 一键安装脚本）
 
+exe 首次启动会在**自己所在目录**生成 `Gneko_config.json` 与 `Gneko.log`，右键菜单、换皮肤、命令行参数全部和源码版一致。
+
 ## 环境要求
+
+源码运行需要：
 
 - Windows 10 / 11（依赖 Win32 分层窗口、系统光标接口）
 - Python 3.9+，带 tkinter
 - [Pillow](https://python-pillow.org/)（唯一的第三方依赖）
+
+用 Release 里的 exe 则什么都不用装，Windows 10/11 64 位直接跑。
 
 ## 快速开始
 
@@ -100,6 +107,22 @@ py -3 Gneko_en.py --skin snow # 参数也通用
 ```
 
 两个文件共用同一个 `Gneko_config.json` 和 `skins/` 目录，换着跑不会互相打架。想维护自己的 fork 时，改完中文版把注释一起翻过去就行——两份代码结构完全一致。
+
+## 打包成 exe
+
+需要发给没有 Python 的人时，在仓库根目录跑：
+
+```powershell
+pwsh -File tools\build_exe.ps1                        # 中文版 → dist\Gneko.exe
+pwsh -File tools\build_exe.ps1 -Entry Gneko_en.py -Name Gneko-en   # 英文版
+```
+
+脚本会先把 `docs/gneko.ico` 从 `awake.png` 现场生成，再调 PyInstaller 打成 **单文件、无控制台** 的 exe（约 20 MB，首次启动要多等一两秒解压）。
+
+打包逻辑里有两个关键点，改代码时别弄丢：
+
+- 素材（`Gneko_png/`、`skins/`）被塞进 exe，运行时 PyInstaller 解压到临时目录，代码通过 `ASSET_ROOT`（即 `sys._MEIPASS`）去找；
+- 配置和日志必须写进**用户目录**，所以冻结后 `APP_DIR` 取 `sys.executable` 所在目录——否则设置会被写进临时目录，退出即丢。
 
 ## 操作
 
@@ -185,8 +208,10 @@ py -3 Gneko.py --restore-cursor   # 只把系统光标恢复成默认箭头
 ├─ README.en.md         # English version
 ├─ docs/preview.png     # README 预览图
 ├─ docs/skins_preview.png  # 皮肤对照图
+├─ docs/gneko.ico       # 打包用应用图标（由 awake.png 生成）
 ├─ tools/make_preview.py   # 生成预览图
 ├─ tools/make_skins.py     # 从 Gneko_png 生成各套皮肤
+├─ tools/build_exe.ps1     # 一键打包单文件 exe
 ├─ requirements.txt
 └─ LICENSE
 ```

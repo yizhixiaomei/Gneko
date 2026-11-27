@@ -64,14 +64,21 @@ Or copy `skins/orange` to a new folder and repaint the PNGs by hand. Keep the na
 
 Prefer not to set up Python? Grab the packaged files from the [Releases](https://github.com/yizhixiaomei/Gneko/releases) page:
 
+- `Gneko-vX.Y.Z-windows-x64.exe` — **standalone single-file build**, no Python needed (about 20 MB); just double-click
 - `Gneko-vX.Y.Z-source.zip` — full source, sprites and all nine skins
 - `Gneko-cursor-pack.zip` — the Windows pixel-cat cursor pack (`.cur` / `.ani` plus a one-click installer)
 
+On first launch the exe writes `Gneko_config.json` and `Gneko.log` **next to itself**. Right-click menu, skin switching and CLI flags all behave exactly like the source version.
+
 ## Requirements
+
+Running from source needs:
 
 - Windows 10 / 11 (relies on Win32 layered windows and system cursor APIs)
 - Python 3.9+ with tkinter
 - [Pillow](https://python-pillow.org/) (the only third-party dependency)
+
+The prebuilt exe from Releases needs nothing installed — any 64-bit Windows 10/11 will do.
 
 ## Quick start
 
@@ -100,6 +107,22 @@ py -3 Gneko_en.py --skin snow # same CLI arguments
 ```
 
 Both files share the same `Gneko_config.json` and `skins/` folder, so you can run either without them fighting. If you fork the project, translate the comments along with the Chinese file — the two stay structurally identical.
+
+## Building the exe
+
+To hand it to someone without Python, run this from the repository root:
+
+```powershell
+pwsh -File tools\build_exe.ps1                                    # Chinese build -> dist\Gneko.exe
+pwsh -File tools\build_exe.ps1 -Entry Gneko_en.py -Name Gneko-en  # English build
+```
+
+The script first regenerates `docs/gneko.ico` from `awake.png`, then calls PyInstaller to produce a **single-file, console-free** exe (about 20 MB; the first launch takes a second or two to unpack).
+
+Two details in the packaging logic must survive any refactor:
+
+- Sprites (`Gneko_png/`, `skins/`) are embedded in the exe and unpacked to a temp dir at runtime, so the code looks them up through `ASSET_ROOT` (i.e. `sys._MEIPASS`);
+- Config and log must land in the **user's folder**, so when frozen `APP_DIR` resolves to the directory holding `sys.executable` — otherwise settings would be written into the temp dir and vanish on exit.
 
 ## Controls
 
@@ -183,8 +206,10 @@ py -3 Gneko.py --restore-cursor   # only restore the system cursor to default
 ├─ README.en.md         # English version
 ├─ docs/preview.png     # README preview
 ├─ docs/skins_preview.png  # skin reference sheet
+├─ docs/gneko.ico       # app icon for packaging (generated from awake.png)
 ├─ tools/make_preview.py   # builds the preview image
 ├─ tools/make_skins.py     # generates the preset skins from Gneko_png
+├─ tools/build_exe.ps1     # one-command single-file exe build
 ├─ requirements.txt
 └─ LICENSE
 ```

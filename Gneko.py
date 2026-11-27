@@ -37,7 +37,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageTk
 
-APP_DIR = Path(__file__).resolve().parent
+# 打包成 exe 后：素材被 PyInstaller 解压到临时目录（sys._MEIPASS），
+# 而配置、日志这类需要写入的文件必须留在 exe 所在目录。
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+APP_DIR = Path(sys.executable).resolve().parent if IS_FROZEN else Path(__file__).resolve().parent
+ASSET_ROOT = Path(getattr(sys, "_MEIPASS", APP_DIR)) if IS_FROZEN else APP_DIR
 IS_WIN = sys.platform == "win32"
 LOG_FILE = APP_DIR / "Gneko.log"
 
@@ -418,7 +422,7 @@ SKIN_LABELS = {
 
 def skins_root(cfg: Dict[str, Any]) -> Path:
     folder = Path(str(cfg.get("SKINS_DIR") or "skins"))
-    return folder if folder.is_absolute() else (APP_DIR / folder)
+    return folder if folder.is_absolute() else (ASSET_ROOT / folder)
 
 
 def available_skins(cfg: Dict[str, Any]) -> List[str]:
@@ -451,7 +455,7 @@ def resolve_asset_dir(cfg: Dict[str, Any]) -> Path:
     folder = Path(str(cfg.get("SPRITE_FOLDER") or "Gneko_png"))
     if folder.name in ("neko_png", "Neko_png"):
         folder = folder.with_name("Gneko_png")
-    return folder if folder.is_absolute() else (APP_DIR / folder)
+    return folder if folder.is_absolute() else (ASSET_ROOT / folder)
 
 
 # ---------------------------------------------------------------- 素材库
