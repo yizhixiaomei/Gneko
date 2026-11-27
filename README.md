@@ -60,6 +60,13 @@ py -3 tools/make_skins.py
 
 不想跑脚本也行：复制 `skins/orange` 改成新名字，直接用画图/像素工具改 PNG 保存。文件名规则（`up1`、`dwleft2`、`sleep1`、`utogi`…）保持不变就会被识别；一套皮肤最少只要 `right1/right2` 两帧加一只 `awake` 就能跑，缺的动作会自动回退。
 
+## 下载
+
+不想自己搭环境的话，直接去 [Releases](https://github.com/yizhixiaomei/Gneko/releases) 页面拿打包好的文件：
+
+- `Gneko-vX.Y.Z-source.zip`：完整源码 + 素材 + 九套皮肤
+- `Gneko-cursor-pack.zip`：Windows 像素猫光标包（`.cur` / `.ani` + 一键安装脚本）
+
 ## 环境要求
 
 - Windows 10 / 11（依赖 Win32 分层窗口、系统光标接口）

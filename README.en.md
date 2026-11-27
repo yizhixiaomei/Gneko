@@ -60,6 +60,13 @@ py -3 tools/make_skins.py
 
 Or copy `skins/orange` to a new folder and repaint the PNGs by hand. Keep the naming pattern (`up1`, `dwleft2`, `sleep1`, `utogi`, …) and they will be picked up; the minimum viable skin is `right1`/`right2` plus one `awake` frame — anything missing falls back automatically.
 
+## Download
+
+Prefer not to set up Python? Grab the packaged files from the [Releases](https://github.com/yizhixiaomei/Gneko/releases) page:
+
+- `Gneko-vX.Y.Z-source.zip` — full source, sprites and all nine skins
+- `Gneko-cursor-pack.zip` — the Windows pixel-cat cursor pack (`.cur` / `.ani` plus a one-click installer)
+
 ## Requirements
 
 - Windows 10 / 11 (relies on Win32 layered windows and system cursor APIs)
