@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Gneko
+GenericName=Desktop Pet
+Comment=一只像素猫，在桌面上走来走去 / A pixel cat that wanders your desktop
+Exec=@BIN@
+Path=@APP_DIR@
+Icon=@APP_DIR@/Gneko_png/awake.png
+Terminal=false
+Categories=Game;Amusement;
+StartupNotify=false

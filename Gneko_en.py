@@ -25,9 +25,11 @@ import ctypes
 import ctypes.wintypes as wt
 import json
 import math
+import os
 import random
 import re
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -43,7 +45,23 @@ IS_FROZEN = bool(getattr(sys, "frozen", False))
 APP_DIR = Path(sys.executable).resolve().parent if IS_FROZEN else Path(__file__).resolve().parent
 ASSET_ROOT = Path(getattr(sys, "_MEIPASS", APP_DIR)) if IS_FROZEN else APP_DIR
 IS_WIN = sys.platform == "win32"
-LOG_FILE = APP_DIR / "Gneko.log"
+IS_LINUX = sys.platform.startswith("linux")
+
+
+def _xdg_dir(env_var: str, fallback: str) -> Path:
+    """On Linux, config and logs follow the XDG spec instead of the source dir."""
+    base = os.environ.get(env_var)
+    root = Path(base) if base else (Path.home() / fallback)
+    return root / "gneko"
+
+
+CONFIG_DIR = _xdg_dir("XDG_CONFIG_HOME", ".config") if IS_LINUX else APP_DIR
+STATE_DIR = _xdg_dir("XDG_STATE_HOME", ".local/state") if IS_LINUX else APP_DIR
+LOG_FILE = STATE_DIR / "Gneko.log"
+
+
+def default_config_path() -> Path:
+    return CONFIG_DIR / "Gneko_config.json"
 
 
 # ---------------------------------------------------------------- Logging
@@ -52,6 +70,7 @@ def log(msg: str) -> None:
     """pythonw has no console, so key information goes to disk for later debugging."""
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}\n"
     try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
         if LOG_FILE.exists() and LOG_FILE.stat().st_size > 512 * 1024:
             LOG_FILE.write_text(line, encoding="utf-8")
         else:
@@ -83,6 +102,10 @@ def install_exception_hooks() -> None:
 
 
 def is_key_down(vk: int) -> bool:
+    if IS_LINUX:
+        s = x11()
+        name = {0x11: "ctrl", 0x12: "alt", 0x1B: "esc", 0x47: "g"}.get(int(vk))
+        return bool(s and name and s.key_down(name))
     if not IS_WIN:
         return False
     try:
@@ -311,6 +334,12 @@ def get_cursor_pos() -> Tuple[int, int]:
             return int(pt.x), int(pt.y)
         except Exception:
             pass
+    if IS_LINUX:
+        s = x11()
+        if s is not None:
+            ox, oy, _ = s.pointer()
+            if ox or oy:
+                return ox, oy
     try:
         return tk._default_root.winfo_pointerx(), tk._default_root.winfo_pointery()
     except Exception:
@@ -318,6 +347,9 @@ def get_cursor_pos() -> Tuple[int, int]:
 
 
 def is_left_button_down() -> bool:
+    if IS_LINUX:
+        s = x11()
+        return bool(s and s.button1_down())
     if not IS_WIN:
         return False
     try:
@@ -335,6 +367,12 @@ def virtual_screen() -> Tuple[int, int, int, int]:
                     u.GetSystemMetrics(78), u.GetSystemMetrics(79))
         except Exception:
             pass
+    try:
+        r = tk._default_root
+        if r is not None:
+            return 0, 0, int(r.winfo_screenwidth()), int(r.winfo_screenheight())
+    except Exception:
+        pass
     return 0, 0, 1920, 1080
 
 
@@ -348,14 +386,222 @@ def primary_workarea() -> Tuple[int, int, int, int]:
                 return r.left, r.top, r.right, r.bottom
         except Exception:
             pass
+    # No _NET_WORKAREA on Linux: desktop environments differ too much, so we use
+    # the whole screen. The cat may brush against a dock at the edges — known quirk.
     vx, vy, vw, vh = virtual_screen()
     return vx, vy, vx + vw, vy + vh
+
+
+# ---------------------------------------------------------------- Linux / X11
+#
+# Windows relies on colour-key transparency plus SetSystemCursor, neither of
+# which exists on Linux:
+#   * transparency is done with the SHAPE extension, clipping the window to the
+#     outline of the current frame;
+#   * the system cursor cannot be swapped (no cross-desktop API), so we skip it.
+# Global mouse buttons, Ctrl+Alt+G and Esc are read via XQueryPointer /
+# XQueryKeymap: no key grabbing, no focus stealing.
+
+class X11State:
+    """Minimal libX11 wrapper: pointer/keyboard state plus SHAPE clipping."""
+
+    BUTTON1 = 1 << 8
+    SHAPE_BOUNDING = 0
+    SHAPE_INPUT = 2
+    SHAPE_SET = 0
+
+    def __init__(self) -> None:
+        self.ok = False
+        self.dpy = None          # type: Optional[int]
+        self.root = 0
+        self.keycodes: Dict[str, int] = {}
+        if not IS_LINUX:
+            return
+        try:
+            self.x11 = ctypes.CDLL("libX11.so.6")
+            self.xext = ctypes.CDLL("libXext.so.6")
+
+            self.x11.XOpenDisplay.restype = ctypes.c_void_p
+            self.x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            self.dpy = self.x11.XOpenDisplay(None)
+            if not self.dpy:
+                raise RuntimeError("XOpenDisplay returned NULL (no graphical session?)")
+
+            self.x11.XDefaultRootWindow.restype = ctypes.c_ulong
+            self.x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+            self.root = int(self.x11.XDefaultRootWindow(ctypes.c_void_p(self.dpy)))
+
+            self.x11.XKeysymToKeycode.restype = ctypes.c_ubyte
+            self.x11.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+            for name, sym in (("esc", 0xFF1B), ("ctrl", 0xFFE3), ("alt", 0xFFE9), ("g", 0x67)):
+                self.keycodes[name] = int(self.x11.XKeysymToKeycode(ctypes.c_void_p(self.dpy), sym))
+
+            ul = ctypes.c_ulong
+            pi = ctypes.POINTER(ctypes.c_int)
+            self.x11.XQueryPointer.restype = ctypes.c_int
+            self.x11.XQueryPointer.argtypes = [ctypes.c_void_p, ul, ctypes.POINTER(ul),
+                                               ctypes.POINTER(ul), pi, pi, pi, pi,
+                                               ctypes.POINTER(ctypes.c_uint)]
+            self.x11.XQueryKeymap.restype = ctypes.c_int
+            self.x11.XQueryKeymap.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ubyte)]
+
+            self.x11.XQueryTree.restype = ctypes.c_int
+            self.x11.XQueryTree.argtypes = [ctypes.c_void_p, ul, ctypes.POINTER(ul),
+                                             ctypes.POINTER(ul),
+                                             ctypes.POINTER(ctypes.POINTER(ul)),
+                                             ctypes.POINTER(ctypes.c_uint)]
+            self.x11.XCreateBitmapFromData.restype = ul
+            self.x11.XCreateBitmapFromData.argtypes = [ctypes.c_void_p, ul, ctypes.c_char_p,
+                                                       ctypes.c_uint, ctypes.c_uint]
+            self.x11.XFreePixmap.argtypes = [ctypes.c_void_p, ul]
+            self.x11.XFree.restype = ctypes.c_int
+            self.x11.XFree.argtypes = [ctypes.c_void_p]
+            self.x11.XFlush.argtypes = [ctypes.c_void_p]
+
+            self.xext.XShapeCombineMask.restype = None
+            self.xext.XShapeCombineMask.argtypes = [ctypes.c_void_p, ul, ctypes.c_int,
+                                                    ctypes.c_int, ctypes.c_int, ul, ctypes.c_int]
+            self.xext.XShapeCombineRectangles.restype = None
+            self.xext.XShapeCombineRectangles.argtypes = [ctypes.c_void_p, ul, ctypes.c_int,
+                                                          ctypes.c_int, ctypes.c_int,
+                                                          ctypes.c_void_p, ctypes.c_int,
+                                                          ctypes.c_int, ctypes.c_int]
+            self.ok = True
+            log("[Gneko] X11 connected, SHAPE and global input available")
+        except Exception as e:
+            print(f"[WARN] X11 init failed, Linux features degraded: {e}")
+
+    # ---------- input ----------
+    def pointer(self) -> Tuple[int, int, int]:
+        """Return (screen x, screen y, button mask)."""
+        if not self.ok or not self.dpy:
+            return 0, 0, 0
+        rx, ry = ctypes.c_int(), ctypes.c_int()
+        wx, wy = ctypes.c_int(), ctypes.c_int()
+        ret_root, ret_child = ctypes.c_ulong(), ctypes.c_ulong()
+        mask = ctypes.c_uint()
+        try:
+            self.x11.XQueryPointer(ctypes.c_void_p(self.dpy), ctypes.c_ulong(self.root),
+                                   ctypes.byref(ret_root), ctypes.byref(ret_child),
+                                   ctypes.byref(rx), ctypes.byref(ry),
+                                   ctypes.byref(wx), ctypes.byref(wy), ctypes.byref(mask))
+            return int(rx.value), int(ry.value), int(mask.value)
+        except Exception:
+            return 0, 0, 0
+
+    def button1_down(self) -> bool:
+        return bool(self.pointer()[2] & self.BUTTON1)
+
+    def key_down(self, name: str) -> bool:
+        if not self.ok or not self.dpy:
+            return False
+        code = self.keycodes.get(name, 0)
+        if not code:
+            return False
+        buf = (ctypes.c_ubyte * 32)()
+        try:
+            self.x11.XQueryKeymap(ctypes.c_void_p(self.dpy), buf)
+        except Exception:
+            return False
+        return bool(buf[code // 8] & (1 << (code % 8)))
+
+    def toplevel(self, win_id: int) -> int:
+        """winfo_id() gives Tk's inner window; the window X actually maps is its parent chain."""
+        if not self.ok or not self.dpy or not win_id:
+            return win_id
+        w = int(win_id)
+        try:
+            for _ in range(8):
+                ret_root, parent = ctypes.c_ulong(), ctypes.c_ulong()
+                n = ctypes.c_uint()
+                # Xlib dereferences children_return unconditionally: passing NULL segfaults
+                children = ctypes.POINTER(ctypes.c_ulong)()
+                ok = self.x11.XQueryTree(ctypes.c_void_p(self.dpy), ctypes.c_ulong(w),
+                                         ctypes.byref(ret_root), ctypes.byref(parent),
+                                         ctypes.byref(children), ctypes.byref(n))
+                if children:
+                    self.x11.XFree(children)
+                if not ok:
+                    break
+                if not parent.value or int(parent.value) == self.root:
+                    break
+                w = int(parent.value)
+        except Exception:
+            return int(win_id)
+        return w
+
+    # ---------- SHAPE ----------
+    def shape(self, win_id: int, data: bytes, w: int, h: int, click_through: bool) -> bool:
+        """Clip the window to `data` (1-bit mask, 1 = visible); clicks pass through gaps."""
+        if not self.ok or not self.dpy or not win_id:
+            return False
+        win_id = self.toplevel(win_id)
+        try:
+            win = ctypes.c_ulong(int(win_id))
+            need = ((int(w) + 7) // 8) * int(h)
+            if len(data) != need:
+                # 掩码按正方形帧生成，PET_HEIGHT 与 PET_WIDTH 不同时要补齐，
+                # 否则 XCreateBitmapFromData 会越界读
+                data = (data + b"\x00" * need)[:need]
+            pix = self.x11.XCreateBitmapFromData(ctypes.c_void_p(self.dpy), win,
+                                                 ctypes.c_char_p(data), int(w), int(h))
+            if not pix:
+                return False
+            self.xext.XShapeCombineMask(ctypes.c_void_p(self.dpy), win, self.SHAPE_BOUNDING,
+                                        0, 0, ctypes.c_ulong(pix), self.SHAPE_SET)
+            if click_through:
+                # An empty input region makes the whole window ignore the mouse.
+                self.xext.XShapeCombineRectangles(ctypes.c_void_p(self.dpy), win, self.SHAPE_INPUT,
+                                                  0, 0, None, 0, self.SHAPE_SET, 0)
+            else:
+                self.xext.XShapeCombineMask(ctypes.c_void_p(self.dpy), win, self.SHAPE_INPUT,
+                                            0, 0, ctypes.c_ulong(pix), self.SHAPE_SET)
+            self.x11.XFreePixmap(ctypes.c_void_p(self.dpy), ctypes.c_ulong(pix))
+            self.x11.XFlush(ctypes.c_void_p(self.dpy))
+            return True
+        except Exception as e:
+            print(f"[WARN] X11 SHAPE failed: {e}")
+            return False
+
+
+_X11: Optional[X11State] = None
+
+
+def x11() -> Optional[X11State]:
+    """Connect lazily: pure CLI commands like --list-skins never touch X."""
+    global _X11
+    if not IS_LINUX:
+        return None
+    if _X11 is None:
+        _X11 = X11State()
+    return _X11 if _X11.ok else None
+
+
+def setup_fonts() -> None:
+    """Tk's default font often lacks CJK glyphs on Linux, turning menus into boxes."""
+    if not IS_LINUX:
+        return
+    try:
+        import tkinter.font as tkfont
+        families = set(tkfont.families())
+        for cand in ("Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC",
+                     "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "Droid Sans Fallback"):
+            if cand in families:
+                for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+                    tkfont.nametofont(name).configure(family=cand)
+                log(f"[Gneko] UI font: {cand}")
+                return
+        log("[Gneko] no CJK font found, menus may show boxes (install fonts-noto-cjk)")
+    except Exception as e:
+        log(f"[WARN] font setup failed: {e}")
+
 
 
 # ---------------------------------------------------------------- Config I/O
 
 def save_config(config_path: Path, cfg: Dict[str, Any]) -> None:
     try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=4, ensure_ascii=False)
     except Exception as e:
@@ -477,6 +723,7 @@ class SpriteBank:
         self.play: List[ImageTk.PhotoImage] = []
         self.extra_idle: List[ImageTk.PhotoImage] = []
         self.special: Dict[str, ImageTk.PhotoImage] = {}
+        self.masks: Dict[int, bytes] = {}   # PhotoImage id -> 1-bit outline (Linux SHAPE)
         self.count = 0
         self._load()
 
@@ -511,7 +758,14 @@ class SpriteBank:
         alpha = im.getchannel("A").point(lambda v: 255 if v >= 128 else 0)
         bg = Image.new("RGBA", im.size, self.key_rgb + (255,))
         bg.paste(im, (0, 0), alpha)
-        return ImageTk.PhotoImage(bg.convert("RGB"))
+        photo = ImageTk.PhotoImage(bg.convert("RGB"))
+        # Keep the outline: Linux uses it to clip the whole window to the cat shape
+        # (1-bit mask, 1 = visible).
+        self.masks[id(photo)] = alpha.convert("1").tobytes()
+        return photo
+
+    def mask_of(self, photo: Optional[ImageTk.PhotoImage]) -> Optional[bytes]:
+        return self.masks.get(id(photo)) if photo is not None else None
 
     def _load(self) -> None:
         if not self.folder.exists():
@@ -869,6 +1123,8 @@ class GnekoPet:
         if cfg["ALWAYS_ON_TOP"]:
             self.root.attributes("-topmost", True)
         self.transparent_ok = self._setup_transparency()
+        self._last_mask: Optional[bytes] = None   # current outline used by Linux SHAPE
+        self._shape_win = 0
 
         # DPI and scaling
         self.dpi_factor = 1.0
@@ -910,6 +1166,8 @@ class GnekoPet:
         self.root.update_idletasks()
         self.hwnd = self._get_hwnd()
         self._apply_window_flags()
+        if IS_LINUX:
+            self._apply_shape()   # clip to a full rect first so nothing flashes before frame 1
         if bool(self.cfg.get("CLICK_THROUGH", False)):
             self.set_click_through(True, silent=True)
 
@@ -975,6 +1233,7 @@ class GnekoPet:
         self._left_prev = False
         self._last_say = 0.0
         self._hotkey_prev = False
+        self._esc_prev = False
         self.click_through = bool(cfg.get("CLICK_THROUGH", False))
 
         # multi-cat
@@ -1004,6 +1263,13 @@ class GnekoPet:
 
     # ---------------- window ----------------
     def _setup_transparency(self) -> bool:
+        if IS_LINUX:
+            # No colour-key transparency on Linux: each frame clips the window to
+            # the cat's outline via SHAPE (see _apply_shape), applied once frame 1 renders.
+            if x11() is None:
+                print("[WARN] no X11/SHAPE available, the window will be a solid box")
+                return False
+            return True
         if not IS_WIN:
             return False
         try:
@@ -1012,6 +1278,24 @@ class GnekoPet:
         except Exception:
             print("[WARN] colour-key transparency unavailable, falling back to a plain window")
             return False
+
+    def _apply_shape(self, mask: Optional[bytes] = None) -> None:
+        """Linux: clip the window to the 1-bit mask; in click-through mode clear the input region."""
+        if not IS_LINUX:
+            return
+        s = x11()
+        if s is None:
+            return
+        if mask:
+            self._last_mask = mask
+        data = self._last_mask
+        if not data:
+            # Nothing rendered yet: keep the window fully visible.
+            data = b"\xff" * (((self.pet_w + 7) // 8) * self.pet_h)
+        win = int(self.root.winfo_id())
+        if s.shape(win, data, self.pet_w, self.pet_h, bool(getattr(self, "click_through", False))):
+            self.transparent_ok = True
+            self._shape_win = win
 
     def _get_hwnd(self) -> int:
         if not IS_WIN:
@@ -1264,6 +1548,21 @@ class GnekoPet:
 
     def set_click_through(self, on: bool, silent: bool = False) -> None:
         """Click-through: the cat stops blocking windows underneath; Ctrl+Alt+G brings it back."""
+        if IS_LINUX:
+            self.click_through = bool(on)
+            self.cfg["CLICK_THROUGH"] = self.click_through
+            if hasattr(self, "through_var"):
+                self.through_var.set(self.click_through)
+            self._apply_shape()
+            if on:
+                self.state = STATE_IDLE
+                self.is_chase_mode = False
+                if not silent:
+                    self.say("click-through on")
+            elif not silent:
+                self.say("back again")
+            self.save()
+            return
         if not self.hwnd:
             return
         u = ctypes.windll.user32
@@ -1296,11 +1595,19 @@ class GnekoPet:
         if combo and not self._hotkey_prev:
             self.set_click_through(not self.click_through)
         self._hotkey_prev = combo
+        if IS_LINUX:
+            # A borderless window rarely gets focus, so Esc has to be polled globally.
+            esc = is_key_down(0x1B)
+            if esc and not self._esc_prev:
+                self.quit()
+            self._esc_prev = esc
 
     def open_asset_folder(self) -> None:
         try:
-            import os
-            os.startfile(str(self.asset_dir))  # type: ignore[attr-defined]
+            if IS_LINUX:
+                subprocess.Popen(["xdg-open", str(self.asset_dir)])
+            else:
+                os.startfile(str(self.asset_dir))  # type: ignore[attr-defined]
         except Exception as e:
             print(f"[WARN] cannot open the sprite folder: {e}")
 
@@ -2081,6 +2388,9 @@ class GnekoPet:
             if img is not self._last_img:
                 self.canvas.itemconfig(self.image_item, image=img)
                 self._last_img = img
+                if IS_LINUX:
+                    # Follow the frame with its outline: a shaped cat, not a box.
+                    self._apply_shape(self.bank.mask_of(img))
         elif self.fallback_rect is None:
             self.fallback_rect = self.canvas.create_rectangle(
                 1, 1, self.pet_w - 2, self.pet_h - 2, fill=self.cfg["FALLBACK_COLOR"])
@@ -2146,7 +2456,7 @@ def main() -> None:
         print("System cursor restored to default.")
         return
 
-    config_path = Path(args.config) if args.config else (APP_DIR / "Gneko_config.json")
+    config_path = Path(args.config) if args.config else default_config_path()
     cfg = load_or_create_config(config_path)
 
     if args.list_skins:
@@ -2171,6 +2481,7 @@ def main() -> None:
     print(f"[Gneko] sprites: {resolve_asset_dir(cfg)} (skin {cfg.get('SKIN') or SKIN_CLASSIC})")
 
     root = tk.Tk()
+    setup_fonts()
     root.report_callback_exception = lambda *_: log_exception("tk-callback")
     app = GnekoPet(root, cfg, config_path)
     log(f"[Gneko] started: {app.scale}x {app.pet_w}x{app.pet_h} transparent={app.transparent_ok} "

@@ -81,11 +81,45 @@ exe 首次启动会在**自己所在目录**生成 `Gneko_config.json` 与 `Gnek
 
 源码运行需要：
 
-- Windows 10 / 11（依赖 Win32 分层窗口、系统光标接口）
+- **Windows 10 / 11**（Win32 分层窗口 + 系统光标接口），或 **Linux（X11）**
 - Python 3.9+，带 tkinter
 - [Pillow](https://python-pillow.org/)（唯一的第三方依赖）
 
 用 Release 里的 exe 则什么都不用装，Windows 10/11 64 位直接跑。
+
+## Linux
+
+Linux 版是同一份 `Gneko.py`，靠 `sys.platform` 分支切换平台实现，**没有第二份源码要维护**。
+
+```bash
+sudo apt install python3-tk python3-pil fonts-noto-cjk   # Debian / Ubuntu
+./linux/gneko                                            # 直接跑
+./linux/install.sh                                       # 装进 ~/.local（启动器 + 菜单项）
+./linux/install.sh --autostart                           # 再加登录自启
+./linux/uninstall.sh                                     # 卸载（不动配置和源码）
+```
+
+Fedora 是 `sudo dnf install python3-tkinter python3-pillow`，Arch 是 `sudo pacman -S tk python-pillow`。
+
+### Linux 上和 Windows 不一样的地方
+
+| 功能 | Windows | Linux |
+| --- | --- | --- |
+| 透明 | 色键透明（`transparentcolor` + 分层窗口） | **X11 SHAPE 扩展**，每帧按猫的轮廓裁剪窗口，空白处真的没有像素 |
+| 点击穿透 | `WS_EX_TRANSPARENT` | 清空窗口的 SHAPE 输入区域，效果一样 |
+| 老鼠光标 | `SetSystemCursor` 全局替换 | 没有跨桌面环境的 API，**跳过该功能**，日志里会写一行说明 |
+| 置顶 / 无边框 | `overrideredirect` + `SetWindowPos` | `overrideredirect` + `-topmost`，由窗口管理器配合 |
+| Esc 退出 / `Ctrl+Alt+G` | `GetAsyncKeyState` | `XQueryKeymap` 全局读键，不用抢焦点、不用抓键 |
+| 配置与日志 | 程序目录 | XDG：`~/.config/gneko/`、`~/.local/state/gneko/` |
+| 屏幕范围 | 多显示器 + 任务栏工作区 | 整块屏幕（各桌面环境 `_NET_WORKAREA` 差异大，暂不读） |
+| 中文字体 | 系统自带 | 自动挑 Noto Sans CJK / 文泉驿；都没有会提示装 `fonts-noto-cjk` |
+
+已知限制：
+
+- 只支持 **X11**（含 Wayland 上的 XWayland）。纯 Wayland 原生协议下 Tk 拿不到 SHAPE，窗口会退化成方框。
+- 需要合成器不是必须的——SHAPE 是 X11 服务端裁剪，不吃 compositor。
+- 系统光标不替换，所以追鼠标时鼠标仍是普通箭头（Windows 上才有小老鼠）。
+
 
 ## 快速开始
 

@@ -25,9 +25,11 @@ import ctypes
 import ctypes.wintypes as wt
 import json
 import math
+import os
 import random
 import re
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -43,7 +45,23 @@ IS_FROZEN = bool(getattr(sys, "frozen", False))
 APP_DIR = Path(sys.executable).resolve().parent if IS_FROZEN else Path(__file__).resolve().parent
 ASSET_ROOT = Path(getattr(sys, "_MEIPASS", APP_DIR)) if IS_FROZEN else APP_DIR
 IS_WIN = sys.platform == "win32"
-LOG_FILE = APP_DIR / "Gneko.log"
+IS_LINUX = sys.platform.startswith("linux")
+
+
+def _xdg_dir(env_var: str, fallback: str) -> Path:
+    """Linux 按 XDG 规范放配置和日志，别往源码目录里写。"""
+    base = os.environ.get(env_var)
+    root = Path(base) if base else (Path.home() / fallback)
+    return root / "gneko"
+
+
+CONFIG_DIR = _xdg_dir("XDG_CONFIG_HOME", ".config") if IS_LINUX else APP_DIR
+STATE_DIR = _xdg_dir("XDG_STATE_HOME", ".local/state") if IS_LINUX else APP_DIR
+LOG_FILE = STATE_DIR / "Gneko.log"
+
+
+def default_config_path() -> Path:
+    return CONFIG_DIR / "Gneko_config.json"
 
 
 # ---------------------------------------------------------------- 日志
@@ -52,6 +70,7 @@ def log(msg: str) -> None:
     """pythonw 下没有控制台，关键信息落盘，方便事后排查。"""
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}\n"
     try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
         if LOG_FILE.exists() and LOG_FILE.stat().st_size > 512 * 1024:
             LOG_FILE.write_text(line, encoding="utf-8")
         else:
@@ -83,6 +102,10 @@ def install_exception_hooks() -> None:
 
 
 def is_key_down(vk: int) -> bool:
+    if IS_LINUX:
+        s = x11()
+        name = {0x11: "ctrl", 0x12: "alt", 0x1B: "esc", 0x47: "g"}.get(int(vk))
+        return bool(s and name and s.key_down(name))
     if not IS_WIN:
         return False
     try:
@@ -311,6 +334,12 @@ def get_cursor_pos() -> Tuple[int, int]:
             return int(pt.x), int(pt.y)
         except Exception:
             pass
+    if IS_LINUX:
+        s = x11()
+        if s is not None:
+            ox, oy, _ = s.pointer()
+            if ox or oy:
+                return ox, oy
     try:
         return tk._default_root.winfo_pointerx(), tk._default_root.winfo_pointery()
     except Exception:
@@ -318,6 +347,9 @@ def get_cursor_pos() -> Tuple[int, int]:
 
 
 def is_left_button_down() -> bool:
+    if IS_LINUX:
+        s = x11()
+        return bool(s and s.button1_down())
     if not IS_WIN:
         return False
     try:
@@ -335,6 +367,12 @@ def virtual_screen() -> Tuple[int, int, int, int]:
                     u.GetSystemMetrics(78), u.GetSystemMetrics(79))
         except Exception:
             pass
+    try:
+        r = tk._default_root
+        if r is not None:
+            return 0, 0, int(r.winfo_screenwidth()), int(r.winfo_screenheight())
+    except Exception:
+        pass
     return 0, 0, 1920, 1080
 
 
@@ -348,14 +386,219 @@ def primary_workarea() -> Tuple[int, int, int, int]:
                 return r.left, r.top, r.right, r.bottom
         except Exception:
             pass
+    # Linux 上不读 _NET_WORKAREA：各桌面环境差异大，直接用整块屏幕，
+    # 猫会贴着屏幕底边走，个别 dock 会被蹭到，属于已知的小瑕疵。
     vx, vy, vw, vh = virtual_screen()
     return vx, vy, vx + vw, vy + vh
+
+
+# ---------------------------------------------------------------- Linux / X11
+#
+# Windows 靠色键透明 + SetSystemCursor，这两样 Linux 都没有：
+#   * 透明改成用 SHAPE 扩展把窗口裁成当前帧的轮廓；
+#   * 系统光标无法替换（没有跨桌面环境的 API），退化成不换，只留日志说明。
+# 全局鼠标按键、Ctrl+Alt+G、Esc 用 XQueryPointer / XQueryKeymap 直接读，
+# 不需要抓键、也不会抢焦点。
+
+class X11State:
+    """libX11 的最小封装：指针/键盘状态 + SHAPE 裁剪。"""
+
+    BUTTON1 = 1 << 8
+    SHAPE_BOUNDING = 0
+    SHAPE_INPUT = 2
+    SHAPE_SET = 0
+
+    def __init__(self) -> None:
+        self.ok = False
+        self.dpy = None          # type: Optional[int]
+        self.root = 0
+        self.keycodes: Dict[str, int] = {}
+        if not IS_LINUX:
+            return
+        try:
+            self.x11 = ctypes.CDLL("libX11.so.6")
+            self.xext = ctypes.CDLL("libXext.so.6")
+
+            self.x11.XOpenDisplay.restype = ctypes.c_void_p
+            self.x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            self.dpy = self.x11.XOpenDisplay(None)
+            if not self.dpy:
+                raise RuntimeError("XOpenDisplay 返回空（没有图形会话？）")
+
+            self.x11.XDefaultRootWindow.restype = ctypes.c_ulong
+            self.x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+            self.root = int(self.x11.XDefaultRootWindow(ctypes.c_void_p(self.dpy)))
+
+            self.x11.XKeysymToKeycode.restype = ctypes.c_ubyte
+            self.x11.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+            for name, sym in (("esc", 0xFF1B), ("ctrl", 0xFFE3), ("alt", 0xFFE9), ("g", 0x67)):
+                self.keycodes[name] = int(self.x11.XKeysymToKeycode(ctypes.c_void_p(self.dpy), sym))
+
+            ul = ctypes.c_ulong
+            pi = ctypes.POINTER(ctypes.c_int)
+            self.x11.XQueryPointer.restype = ctypes.c_int
+            self.x11.XQueryPointer.argtypes = [ctypes.c_void_p, ul, ctypes.POINTER(ul),
+                                               ctypes.POINTER(ul), pi, pi, pi, pi,
+                                               ctypes.POINTER(ctypes.c_uint)]
+            self.x11.XQueryKeymap.restype = ctypes.c_int
+            self.x11.XQueryKeymap.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ubyte)]
+
+            self.x11.XQueryTree.restype = ctypes.c_int
+            self.x11.XQueryTree.argtypes = [ctypes.c_void_p, ul, ctypes.POINTER(ul),
+                                             ctypes.POINTER(ul),
+                                             ctypes.POINTER(ctypes.POINTER(ul)),
+                                             ctypes.POINTER(ctypes.c_uint)]
+            self.x11.XCreateBitmapFromData.restype = ul
+            self.x11.XCreateBitmapFromData.argtypes = [ctypes.c_void_p, ul, ctypes.c_char_p,
+                                                       ctypes.c_uint, ctypes.c_uint]
+            self.x11.XFreePixmap.argtypes = [ctypes.c_void_p, ul]
+            self.x11.XFree.restype = ctypes.c_int
+            self.x11.XFree.argtypes = [ctypes.c_void_p]
+            self.x11.XFlush.argtypes = [ctypes.c_void_p]
+
+            self.xext.XShapeCombineMask.restype = None
+            self.xext.XShapeCombineMask.argtypes = [ctypes.c_void_p, ul, ctypes.c_int,
+                                                    ctypes.c_int, ctypes.c_int, ul, ctypes.c_int]
+            self.xext.XShapeCombineRectangles.restype = None
+            self.xext.XShapeCombineRectangles.argtypes = [ctypes.c_void_p, ul, ctypes.c_int,
+                                                          ctypes.c_int, ctypes.c_int,
+                                                          ctypes.c_void_p, ctypes.c_int,
+                                                          ctypes.c_int, ctypes.c_int]
+            self.ok = True
+            log("[Gneko] X11 已连接，SHAPE 与全局输入可用")
+        except Exception as e:
+            print(f"[WARN] X11 初始化失败，Linux 特性降级: {e}")
+
+    # ---------- 输入 ----------
+    def pointer(self) -> Tuple[int, int, int]:
+        """返回 (屏幕坐标 x, y, 按钮掩码)。"""
+        if not self.ok or not self.dpy:
+            return 0, 0, 0
+        rx, ry = ctypes.c_int(), ctypes.c_int()
+        wx, wy = ctypes.c_int(), ctypes.c_int()
+        ret_root, ret_child = ctypes.c_ulong(), ctypes.c_ulong()
+        mask = ctypes.c_uint()
+        try:
+            self.x11.XQueryPointer(ctypes.c_void_p(self.dpy), ctypes.c_ulong(self.root),
+                                   ctypes.byref(ret_root), ctypes.byref(ret_child),
+                                   ctypes.byref(rx), ctypes.byref(ry),
+                                   ctypes.byref(wx), ctypes.byref(wy), ctypes.byref(mask))
+            return int(rx.value), int(ry.value), int(mask.value)
+        except Exception:
+            return 0, 0, 0
+
+    def button1_down(self) -> bool:
+        return bool(self.pointer()[2] & self.BUTTON1)
+
+    def key_down(self, name: str) -> bool:
+        if not self.ok or not self.dpy:
+            return False
+        code = self.keycodes.get(name, 0)
+        if not code:
+            return False
+        buf = (ctypes.c_ubyte * 32)()
+        try:
+            self.x11.XQueryKeymap(ctypes.c_void_p(self.dpy), buf)
+        except Exception:
+            return False
+        return bool(buf[code // 8] & (1 << (code % 8)))
+
+    def toplevel(self, win_id: int) -> int:
+        """Tk 的 winfo_id 给的是内层窗口，真正被 X 看到的顶层窗口要往上翻。"""
+        if not self.ok or not self.dpy or not win_id:
+            return win_id
+        w = int(win_id)
+        try:
+            for _ in range(8):
+                ret_root, parent = ctypes.c_ulong(), ctypes.c_ulong()
+                n = ctypes.c_uint()
+                # Xlib 会无条件解引用 children_return，传 NULL 直接段错误
+                children = ctypes.POINTER(ctypes.c_ulong)()
+                ok = self.x11.XQueryTree(ctypes.c_void_p(self.dpy), ctypes.c_ulong(w),
+                                         ctypes.byref(ret_root), ctypes.byref(parent),
+                                         ctypes.byref(children), ctypes.byref(n))
+                if children:
+                    self.x11.XFree(children)
+                if not ok:
+                    break
+                if not parent.value or int(parent.value) == self.root:
+                    break
+                w = int(parent.value)
+        except Exception:
+            return int(win_id)
+        return w
+
+    # ---------- SHAPE ----------
+    def shape(self, win_id: int, data: bytes, w: int, h: int, click_through: bool) -> bool:
+        """把窗口裁成 data（1 位掩码，1=可见）的形状；点空白处直接穿透。"""
+        if not self.ok or not self.dpy or not win_id:
+            return False
+        win_id = self.toplevel(win_id)
+        try:
+            win = ctypes.c_ulong(int(win_id))
+            need = ((int(w) + 7) // 8) * int(h)
+            if len(data) != need:
+                # 掩码按正方形帧生成，PET_HEIGHT 与 PET_WIDTH 不同时要补齐，
+                # 否则 XCreateBitmapFromData 会越界读
+                data = (data + b"\x00" * need)[:need]
+            pix = self.x11.XCreateBitmapFromData(ctypes.c_void_p(self.dpy), win,
+                                                 ctypes.c_char_p(data), int(w), int(h))
+            if not pix:
+                return False
+            self.xext.XShapeCombineMask(ctypes.c_void_p(self.dpy), win, self.SHAPE_BOUNDING,
+                                        0, 0, ctypes.c_ulong(pix), self.SHAPE_SET)
+            if click_through:
+                # 输入区域清空 = 整块窗口都不接收鼠标事件
+                self.xext.XShapeCombineRectangles(ctypes.c_void_p(self.dpy), win, self.SHAPE_INPUT,
+                                                  0, 0, None, 0, self.SHAPE_SET, 0)
+            else:
+                self.xext.XShapeCombineMask(ctypes.c_void_p(self.dpy), win, self.SHAPE_INPUT,
+                                            0, 0, ctypes.c_ulong(pix), self.SHAPE_SET)
+            self.x11.XFreePixmap(ctypes.c_void_p(self.dpy), ctypes.c_ulong(pix))
+            self.x11.XFlush(ctypes.c_void_p(self.dpy))
+            return True
+        except Exception as e:
+            print(f"[WARN] X11 SHAPE 失败: {e}")
+            return False
+
+
+_X11: Optional[X11State] = None
+
+
+def x11() -> Optional[X11State]:
+    """第一次真正需要时才连 X 服务器，--list-skins 之类的纯命令行用法不碰它。"""
+    global _X11
+    if not IS_LINUX:
+        return None
+    if _X11 is None:
+        _X11 = X11State()
+    return _X11 if _X11.ok else None
+
+
+def setup_fonts() -> None:
+    """Linux 上 Tk 默认字体常常没有中文，菜单和气泡会变成方块。"""
+    if not IS_LINUX:
+        return
+    try:
+        import tkinter.font as tkfont
+        families = set(tkfont.families())
+        for cand in ("Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC",
+                     "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "Droid Sans Fallback"):
+            if cand in families:
+                for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+                    tkfont.nametofont(name).configure(family=cand)
+                log(f"[Gneko] 界面字体: {cand}")
+                return
+        log("[Gneko] 没找到中文字体，菜单可能显示方块（装 fonts-noto-cjk 可解）")
+    except Exception as e:
+        log(f"[WARN] 字体设置失败: {e}")
 
 
 # ---------------------------------------------------------------- 配置读写
 
 def save_config(config_path: Path, cfg: Dict[str, Any]) -> None:
     try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=4, ensure_ascii=False)
     except Exception as e:
@@ -477,6 +720,7 @@ class SpriteBank:
         self.play: List[ImageTk.PhotoImage] = []
         self.extra_idle: List[ImageTk.PhotoImage] = []
         self.special: Dict[str, ImageTk.PhotoImage] = {}
+        self.masks: Dict[int, bytes] = {}   # PhotoImage id -> 1 位轮廓掩码（Linux SHAPE 用）
         self.count = 0
         self._load()
 
@@ -510,7 +754,13 @@ class SpriteBank:
         alpha = im.getchannel("A").point(lambda v: 255 if v >= 128 else 0)
         bg = Image.new("RGBA", im.size, self.key_rgb + (255,))
         bg.paste(im, (0, 0), alpha)
-        return ImageTk.PhotoImage(bg.convert("RGB"))
+        photo = ImageTk.PhotoImage(bg.convert("RGB"))
+        # 轮廓留一份：Linux 用它把整块窗口裁成猫的形状（1 位掩码，1=可见）
+        self.masks[id(photo)] = alpha.convert("1").tobytes()
+        return photo
+
+    def mask_of(self, photo: Optional[ImageTk.PhotoImage]) -> Optional[bytes]:
+        return self.masks.get(id(photo)) if photo is not None else None
 
     def _load(self) -> None:
         if not self.folder.exists():
@@ -868,6 +1118,8 @@ class GnekoPet:
         if cfg["ALWAYS_ON_TOP"]:
             self.root.attributes("-topmost", True)
         self.transparent_ok = self._setup_transparency()
+        self._last_mask: Optional[bytes] = None   # Linux SHAPE 用的当前轮廓
+        self._shape_win = 0
 
         # DPI 与缩放
         self.dpi_factor = 1.0
@@ -909,6 +1161,8 @@ class GnekoPet:
         self.root.update_idletasks()
         self.hwnd = self._get_hwnd()
         self._apply_window_flags()
+        if IS_LINUX:
+            self._apply_shape()   # 先裁成整块，避免第一帧出现前闪出方框
         if bool(self.cfg.get("CLICK_THROUGH", False)):
             self.set_click_through(True, silent=True)
 
@@ -974,6 +1228,7 @@ class GnekoPet:
         self._left_prev = False
         self._last_say = 0.0
         self._hotkey_prev = False
+        self._esc_prev = False
         self.click_through = bool(cfg.get("CLICK_THROUGH", False))
 
         # 多猫
@@ -1003,6 +1258,13 @@ class GnekoPet:
 
     # ---------------- 窗口 ----------------
     def _setup_transparency(self) -> bool:
+        if IS_LINUX:
+            # Linux 没有色键透明，改成每帧用 SHAPE 把窗口裁成猫的轮廓，
+            # 真正生效要等第一帧渲染出来（见 _apply_shape）。
+            if x11() is None:
+                print("[WARN] 没有 X11/SHAPE，窗口会是实心方块")
+                return False
+            return True
         if not IS_WIN:
             return False
         try:
@@ -1011,6 +1273,24 @@ class GnekoPet:
         except Exception:
             print("[WARN] 色键透明不可用，退回普通窗口")
             return False
+
+    def _apply_shape(self, mask: Optional[bytes] = None) -> None:
+        """Linux：按 1 位掩码裁剪窗口；穿透模式下把输入区域整个清空。"""
+        if not IS_LINUX:
+            return
+        s = x11()
+        if s is None:
+            return
+        if mask:
+            self._last_mask = mask
+        data = self._last_mask
+        if not data:
+            # 还没渲染过就先裁成整块，保证窗口能显示
+            data = b"\xff" * (((self.pet_w + 7) // 8) * self.pet_h)
+        win = int(self.root.winfo_id())
+        if s.shape(win, data, self.pet_w, self.pet_h, bool(getattr(self, "click_through", False))):
+            self.transparent_ok = True
+            self._shape_win = win
 
     def _get_hwnd(self) -> int:
         if not IS_WIN:
@@ -1263,6 +1543,21 @@ class GnekoPet:
 
     def set_click_through(self, on: bool, silent: bool = False) -> None:
         """穿透点击：猫不再挡住底下的窗口，Ctrl+Alt+G 随时切回来。"""
+        if IS_LINUX:
+            self.click_through = bool(on)
+            self.cfg["CLICK_THROUGH"] = self.click_through
+            if hasattr(self, "through_var"):
+                self.through_var.set(self.click_through)
+            self._apply_shape()
+            if on:
+                self.state = STATE_IDLE
+                self.is_chase_mode = False
+                if not silent:
+                    self.say("透过去啦")
+            elif not silent:
+                self.say("我回来啦")
+            self.save()
+            return
         if not self.hwnd:
             return
         u = ctypes.windll.user32
@@ -1295,11 +1590,19 @@ class GnekoPet:
         if combo and not self._hotkey_prev:
             self.set_click_through(not self.click_through)
         self._hotkey_prev = combo
+        if IS_LINUX:
+            # 无边框窗口基本拿不到焦点，Esc 只能靠全局读键，顺带按住 Ctrl+Q 也能退
+            esc = is_key_down(0x1B)
+            if esc and not self._esc_prev:
+                self.quit()
+            self._esc_prev = esc
 
     def open_asset_folder(self) -> None:
         try:
-            import os
-            os.startfile(str(self.asset_dir))  # type: ignore[attr-defined]
+            if IS_LINUX:
+                subprocess.Popen(["xdg-open", str(self.asset_dir)])
+            else:
+                os.startfile(str(self.asset_dir))  # type: ignore[attr-defined]
         except Exception as e:
             print(f"[WARN] 无法打开素材目录: {e}")
 
@@ -2080,6 +2383,9 @@ class GnekoPet:
             if img is not self._last_img:
                 self.canvas.itemconfig(self.image_item, image=img)
                 self._last_img = img
+                if IS_LINUX:
+                    # 换帧就跟着换轮廓，像素猫在 Linux 上也是"一个形状"而不是方块
+                    self._apply_shape(self.bank.mask_of(img))
         elif self.fallback_rect is None:
             self.fallback_rect = self.canvas.create_rectangle(
                 1, 1, self.pet_w - 2, self.pet_h - 2, fill=self.cfg["FALLBACK_COLOR"])
@@ -2145,7 +2451,7 @@ def main() -> None:
         print("系统光标已恢复默认。")
         return
 
-    config_path = Path(args.config) if args.config else (APP_DIR / "Gneko_config.json")
+    config_path = Path(args.config) if args.config else default_config_path()
     cfg = load_or_create_config(config_path)
 
     if args.list_skins:
@@ -2170,6 +2476,7 @@ def main() -> None:
     print(f"[Gneko] 素材: {resolve_asset_dir(cfg)}（皮肤 {cfg.get('SKIN') or SKIN_CLASSIC}）")
 
     root = tk.Tk()
+    setup_fonts()
     root.report_callback_exception = lambda *_: log_exception("tk-callback")
     app = GnekoPet(root, cfg, config_path)
     log(f"[Gneko] 启动：{app.scale}x {app.pet_w}x{app.pet_h} 透明={app.transparent_ok} "

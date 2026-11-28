@@ -81,11 +81,45 @@ On first launch the exe writes `Gneko_config.json` and `Gneko.log` **next to its
 
 Running from source needs:
 
-- Windows 10 / 11 (relies on Win32 layered windows and system cursor APIs)
+- **Windows 10 / 11** (Win32 layered windows + system cursor APIs), or **Linux (X11)**
 - Python 3.9+ with tkinter
 - [Pillow](https://python-pillow.org/) (the only third-party dependency)
 
 The prebuilt exe from Releases needs nothing installed — any 64-bit Windows 10/11 will do.
+
+## Linux
+
+The Linux build is the very same `Gneko.py`, switching platform code on `sys.platform` — there is no second source tree to maintain.
+
+```bash
+sudo apt install python3-tk python3-pil fonts-noto-cjk   # Debian / Ubuntu
+./linux/gneko                                            # run it
+./linux/install.sh                                       # install into ~/.local (launcher + menu entry)
+./linux/install.sh --autostart                           # plus login autostart
+./linux/uninstall.sh                                     # remove (keeps config and sources)
+```
+
+On Fedora use `sudo dnf install python3-tkinter python3-pillow`, on Arch `sudo pacman -S tk python-pillow`.
+
+### How Linux differs from Windows
+
+| Feature | Windows | Linux |
+| --- | --- | --- |
+| Transparency | colour key (`transparentcolor` + layered window) | **X11 SHAPE**, window clipped to the cat's outline per frame — the gaps hold no pixels at all |
+| Click-through | `WS_EX_TRANSPARENT` | SHAPE input region cleared; same effect |
+| Mouse cursor swap | `SetSystemCursor` (global) | no cross-desktop API, **skipped** (one line in the log) |
+| Always-on-top / borderless | `overrideredirect` + `SetWindowPos` | `overrideredirect` + `-topmost`, cooperating with the WM |
+| Esc / `Ctrl+Alt+G` | `GetAsyncKeyState` | `XQueryKeymap` read globally — no focus needed, no key grabbing |
+| Config & log | next to the program | XDG: `~/.config/gneko/`, `~/.local/state/gneko/` |
+| Screen bounds | multi-monitor + taskbar work area | whole screen (per-DE `_NET_WORKAREA` semantics differ too much to trust) |
+| CJK font | ships with the OS | picks Noto Sans CJK / WenQuanYi automatically, warns if none |
+
+Known limits:
+
+- **X11 only** (including XWayland). Under native Wayland Tk cannot use SHAPE, so the window falls back to a rectangle.
+- No compositor needed — SHAPE clips on the X server.
+- The system cursor is not replaced, so the pointer stays a normal arrow (the little mouse cursor is a Windows-only extra).
+
 
 ## Quick start
 
