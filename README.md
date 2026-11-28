@@ -67,6 +67,13 @@ py -3 tools/make_skins.py
 - `Gneko-vX.Y.Z-windows-x64.exe`：**免装 Python 的单文件版**，下载双击即用（约 20 MB）
 - `Gneko-vX.Y.Z-source.zip`：完整源码 + 素材 + 九套皮肤
 - `Gneko-cursor-pack.zip`：Windows 像素猫光标包（`.cur` / `.ani` + 一键安装脚本）
+- `SHA256SUMS.txt`：三个包的 SHA256 摘要
+
+想确认下载到的确实是原版，下载后算一遍哈希，和 Release 说明里的表格（或 `SHA256SUMS.txt`）对比，一致再用：
+
+```powershell
+Get-FileHash ".\Gneko-vX.Y.Z-windows-x64.exe" -Algorithm SHA256
+```
 
 exe 首次启动会在**自己所在目录**生成 `Gneko_config.json` 与 `Gneko.log`，右键菜单、换皮肤、命令行参数全部和源码版一致。
 

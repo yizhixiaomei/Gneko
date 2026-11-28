@@ -67,6 +67,13 @@ Prefer not to set up Python? Grab the packaged files from the [Releases](https:/
 - `Gneko-vX.Y.Z-windows-x64.exe` — **standalone single-file build**, no Python needed (about 20 MB); just double-click
 - `Gneko-vX.Y.Z-source.zip` — full source, sprites and all nine skins
 - `Gneko-cursor-pack.zip` — the Windows pixel-cat cursor pack (`.cur` / `.ani` plus a one-click installer)
+- `SHA256SUMS.txt` — SHA256 digests for all three archives
+
+To confirm you really got the original build, hash the file after downloading and compare it with the table in the release notes (or `SHA256SUMS.txt`):
+
+```powershell
+Get-FileHash ".\Gneko-vX.Y.Z-windows-x64.exe" -Algorithm SHA256
+```
 
 On first launch the exe writes `Gneko_config.json` and `Gneko.log` **next to itself**. Right-click menu, skin switching and CLI flags all behave exactly like the source version.
 
