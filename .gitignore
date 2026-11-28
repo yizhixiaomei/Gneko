@@ -27,3 +27,9 @@ _chase_out.txt
 _raw*.txt
 
 _build*.log
+
+# 本地发布辅助脚本
+_apipush*.py
+_upload*.py
+_movetag.py
+_fix*.py
