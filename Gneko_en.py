@@ -761,10 +761,10 @@ class SpriteBank:
         photo = ImageTk.PhotoImage(bg.convert("RGB"))
         # Keep the outline: Linux uses it to clip the whole window to the cat shape
         # (1-bit mask, 1 = visible).
-        self.masks[id(photo)] = alpha.convert("1").tobytes()
+        self.masks[id(photo)] = (alpha.convert("1").tobytes(), w, w)
         return photo
 
-    def mask_of(self, photo: Optional[ImageTk.PhotoImage]) -> Optional[bytes]:
+    def mask_of(self, photo: Optional[ImageTk.PhotoImage]) -> Optional[Tuple[bytes, int, int]]:
         return self.masks.get(id(photo)) if photo is not None else None
 
     def _load(self) -> None:
@@ -1123,7 +1123,7 @@ class GnekoPet:
         if cfg["ALWAYS_ON_TOP"]:
             self.root.attributes("-topmost", True)
         self.transparent_ok = self._setup_transparency()
-        self._last_mask: Optional[bytes] = None   # current outline used by Linux SHAPE
+        self._last_mask: Optional[Tuple[bytes, int, int]] = None   # current outline used by Linux SHAPE
         self._shape_win = 0
 
         # DPI and scaling
@@ -1279,7 +1279,7 @@ class GnekoPet:
             print("[WARN] colour-key transparency unavailable, falling back to a plain window")
             return False
 
-    def _apply_shape(self, mask: Optional[bytes] = None) -> None:
+    def _apply_shape(self, mask: Optional[Tuple[bytes, int, int]] = None) -> None:
         """Linux: clip the window to the 1-bit mask; in click-through mode clear the input region."""
         if not IS_LINUX:
             return
@@ -1288,8 +1288,15 @@ class GnekoPet:
             return
         if mask:
             self._last_mask = mask
-        data = self._last_mask
-        if not data:
+        item = self._last_mask
+        if item:
+            data, mw, mh = item
+            if (int(mw), int(mh)) != (self.pet_w, self.pet_h):
+                # Sprites are pre-rendered at cell*scale, which differs from the real
+                # window size; the mask must be rescaled or it gets truncated to nothing.
+                data = Image.frombytes("1", (int(mw), int(mh)), data).resize(
+                    (self.pet_w, self.pet_h), Image.NEAREST).tobytes()
+        else:
             # Nothing rendered yet: keep the window fully visible.
             data = b"\xff" * (((self.pet_w + 7) // 8) * self.pet_h)
         win = int(self.root.winfo_id())

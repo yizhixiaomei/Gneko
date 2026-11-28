@@ -756,10 +756,10 @@ class SpriteBank:
         bg.paste(im, (0, 0), alpha)
         photo = ImageTk.PhotoImage(bg.convert("RGB"))
         # 轮廓留一份：Linux 用它把整块窗口裁成猫的形状（1 位掩码，1=可见）
-        self.masks[id(photo)] = alpha.convert("1").tobytes()
+        self.masks[id(photo)] = (alpha.convert("1").tobytes(), w, w)
         return photo
 
-    def mask_of(self, photo: Optional[ImageTk.PhotoImage]) -> Optional[bytes]:
+    def mask_of(self, photo: Optional[ImageTk.PhotoImage]) -> Optional[Tuple[bytes, int, int]]:
         return self.masks.get(id(photo)) if photo is not None else None
 
     def _load(self) -> None:
@@ -1118,7 +1118,7 @@ class GnekoPet:
         if cfg["ALWAYS_ON_TOP"]:
             self.root.attributes("-topmost", True)
         self.transparent_ok = self._setup_transparency()
-        self._last_mask: Optional[bytes] = None   # Linux SHAPE 用的当前轮廓
+        self._last_mask: Optional[Tuple[bytes, int, int]] = None   # Linux SHAPE 用的当前轮廓
         self._shape_win = 0
 
         # DPI 与缩放
@@ -1274,7 +1274,7 @@ class GnekoPet:
             print("[WARN] 色键透明不可用，退回普通窗口")
             return False
 
-    def _apply_shape(self, mask: Optional[bytes] = None) -> None:
+    def _apply_shape(self, mask: Optional[Tuple[bytes, int, int]] = None) -> None:
         """Linux：按 1 位掩码裁剪窗口；穿透模式下把输入区域整个清空。"""
         if not IS_LINUX:
             return
@@ -1283,8 +1283,15 @@ class GnekoPet:
             return
         if mask:
             self._last_mask = mask
-        data = self._last_mask
-        if not data:
+        item = self._last_mask
+        if item:
+            data, mw, mh = item
+            if (int(mw), int(mh)) != (self.pet_w, self.pet_h):
+                # 素材按 cell*scale 预渲染，和实际窗口不一定同尺寸；
+                # 掩码必须先缩放到窗口大小，否则会被截断成一块空形状
+                data = Image.frombytes("1", (int(mw), int(mh)), data).resize(
+                    (self.pet_w, self.pet_h), Image.NEAREST).tobytes()
+        else:
             # 还没渲染过就先裁成整块，保证窗口能显示
             data = b"\xff" * (((self.pet_w + 7) // 8) * self.pet_h)
         win = int(self.root.winfo_id())
